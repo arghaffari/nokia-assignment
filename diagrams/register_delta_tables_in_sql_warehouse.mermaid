@@ -1,94 +1,115 @@
 sequenceDiagram
-    participant User
-    participant Notebook as Registration Notebook
-    participant MainProcessor as Main Function
-    participant StatusChecker as Status Checker
-    participant Processor as Table Processor
-    participant DeltaTables as Gold Delta Files
-    participant SQLTables as SQL Database Tables
-    participant ControlTable as Control Table
-
-    User->>Notebook: Execute notebook
-    activate Notebook
+    actor User
+    participant Widgets as Databricks Widgets
+    participant Main as Main Function
+    participant SparkInit as Spark Initializer
+    participant DataChecker as Data Processor Checker
+    participant FileSystem as dbutils.fs
+    participant DeltaTableAPI as Delta Table API
+    participant Tables as Database Tables
+    participant TableProcessor as Table Processor
+    participant ControlLogger as Control Logger
     
-    Notebook->>Notebook: Check schema drop setting
+    User->>Widgets: Set force_update parameter
+    Note over Widgets: Configure whether to force table updates
     
-    alt drop_patent_data_schema is true
-        Notebook->>SQLTables: DROP SCHEMA patent_data CASCADE
+    User->>Main: main()
+    Main->>SparkInit: initialize_spark()
+    SparkInit-->>Main: Return SparkSession
+    
+    Main->>DataChecker: check_new_data_processed()
+    
+    DataChecker->>Tables: Query processing_metadata table
+    Tables-->>DataChecker: Return latest processing record
+    
+    alt processing_metadata table not available
+        DataChecker->>FileSystem: Check processing status file
+        FileSystem-->>DataChecker: Return status file content
     end
     
-    Notebook->>MainProcessor: Call main()
-    activate MainProcessor
-    
-    MainProcessor->>MainProcessor: Check force_update setting
-    MainProcessor->>StatusChecker: check_new_data_processed()
-    activate StatusChecker
-    
-    StatusChecker->>SQLTables: Query processing_metadata table
-    alt Metadata table exists
-        SQLTables-->>StatusChecker: Return latest record
-        StatusChecker->>StatusChecker: Extract new_data_processed
-    else Fallback method
-        StatusChecker->>DeltaTables: Check processing status file
-        alt Status file exists
-            DeltaTables-->>StatusChecker: Return status
-        else Try notebook result
-            StatusChecker->>StatusChecker: Get parent notebook result
-            alt Result available
-                StatusChecker->>StatusChecker: Extract new_data_processed
-            else Assume new data
-                StatusChecker->>StatusChecker: Default to true
-            end
-        end
+    alt Status file not available
+        DataChecker->>DataChecker: Try to get previous notebook result
     end
     
-    StatusChecker-->>MainProcessor: Return processing status
-    deactivate StatusChecker
+    DataChecker-->>Main: Return processing status
     
-    alt new_data_processed OR force_update
-        MainProcessor->>Processor: register_and_upsert_all_tables()
-        activate Processor
+    alt No new data and not force_update
+        Main-->>User: Skip processing and exit
+    else New data or force_update
+        Main->>Main: register_and_upsert_all_tables()
         
-        Processor->>SQLTables: Create control table if not exists
+        Main->>Tables: Create control table if not exists
         
-        loop For each gold table
-            Processor->>DeltaTables: Check if path exists
-            DeltaTables-->>Processor: Path status
+        Main->>FileSystem: Debug - list gold path contents
+        FileSystem-->>Main: Return top files
+        
+        Main->>FileSystem: Debug - count silver batch dirs
+        FileSystem-->>Main: Return silver batch count
+        
+        Main->>FileSystem: Debug - count checkpoint files
+        FileSystem-->>Main: Return checkpoint count
+        
+        loop For each configured table (12 tables)
+            Main->>FileSystem: Check if Delta path exists
+            FileSystem-->>Main: Path exists status
             
-            alt Path exists and is valid Delta
-                Processor->>DeltaTables: Read Delta table
-                DeltaTables-->>Processor: Return DataFrame
-                Processor->>Processor: Count source records
+            alt Path exists
+                Main->>DeltaTableAPI: Check if valid Delta table
+                DeltaTableAPI-->>Main: Delta table validity
                 
-                alt Table doesn't exist in database
-                    Processor->>SQLTables: Create new table
-                    Processor->>SQLTables: Set table properties
-                else Table exists and is individual table
-                    Processor->>SQLTables: Read existing table
-                    SQLTables-->>Processor: Return existing count
-                    Processor->>SQLTables: Replace with new data
-                else Table exists and has publication_number
-                    Processor->>SQLTables: Get DeltaTable reference
-                    SQLTables-->>Processor: Return DeltaTable
-                    Processor->>SQLTables: Count before merge
-                    Processor->>SQLTables: Perform merge operation
-                    Processor->>SQLTables: Count after merge
+                alt Valid Delta table
+                    Main->>TableProcessor: register_and_upsert_table()
+                    
+                    TableProcessor->>DeltaTableAPI: Read source Delta table
+                    DeltaTableAPI-->>TableProcessor: Return source DataFrame
+                    
+                    TableProcessor->>TableProcessor: Count source records
+                    
+                    alt Source has data
+                        TableProcessor->>Tables: Check if table exists
+                        Tables-->>TableProcessor: Table existence status
+                        
+                        alt Table doesn't exist
+                            TableProcessor->>Tables: Create new table
+                            TableProcessor->>Tables: Configure table properties
+                            Tables-->>TableProcessor: Table created confirmation
+                        else Table exists and is individual table
+                            TableProcessor->>Tables: Read existing table
+                            Tables-->>TableProcessor: Return target count
+                            
+                            TableProcessor->>TableProcessor: Compare source vs target count
+                            Note over TableProcessor: Warn if source has fewer records
+                            
+                            TableProcessor->>Tables: Replace table data completely
+                            Tables-->>TableProcessor: Replacement confirmation
+                        else Table exists and is regular table
+                            TableProcessor->>DeltaTableAPI: Get target Delta table
+                            DeltaTableAPI-->>TableProcessor: Return target table
+                            
+                            TableProcessor->>Tables: Count target rows before merge
+                            Tables-->>TableProcessor: Return row count
+                            
+                            TableProcessor->>DeltaTableAPI: Perform merge operation
+                            Note over DeltaTableAPI: Match on publication_number
+                            Note over DeltaTableAPI: Update matched records
+                            Note over DeltaTableAPI: Insert new records
+                            DeltaTableAPI-->>TableProcessor: Merge complete confirmation
+                            
+                            TableProcessor->>Tables: Count target rows after merge
+                            Tables-->>TableProcessor: Return updated row count
+                        end
+                    end
+                    
+                    TableProcessor-->>Main: Return operation result
                 end
-            else Path doesn't exist or invalid
-                Processor->>Processor: Skip table
             end
         end
         
-        Processor->>ControlTable: Log update with UUID
-        Processor-->>MainProcessor: Return results for all tables
-        deactivate Processor
+        Main->>ControlLogger: Log update batch in control table
+        ControlLogger-->>Main: Update logged confirmation
         
-        MainProcessor->>MainProcessor: Calculate summary statistics
-        MainProcessor->>Notebook: Return final results
-    else No new data and not forcing update
-        MainProcessor->>Notebook: Skip processing and return
+        Main->>Main: Calculate summary statistics
+        Main->>Main: Print processing summary
+        
+        Main-->>User: Return final results as JSON
     end
-    
-    deactivate MainProcessor
-    Notebook->>User: Display processing summary
-    deactivate Notebook

@@ -1,0 +1,60 @@
+sequenceDiagram
+    actor User
+    participant Widgets as Databricks Widgets
+    participant Spark as Spark Session
+    participant FileSystem as dbutils.fs
+    participant BronzeLayer as Bronze Layer
+    participant Transformer as Field Transformer
+    participant DeltaWriter as Delta Writer
+    participant CheckpointSystem as Checkpoint System
+    participant StatsAnalyzer as Statistics Analyzer
+    
+    User->>Widgets: Configure processing parameters
+    Note over Widgets: Set drop_schema and force_reprocess options
+    
+    User->>Spark: silver_layer_processing()
+    Spark->>Spark: initialize_spark()
+    
+    Spark->>FileSystem: Check bronze directory
+    FileSystem-->>Spark: Return patent directories list
+    
+    alt force_reprocess is true
+        Spark->>FileSystem: Clear checkpoint location
+        Spark->>FileSystem: Clear output directory
+    end
+    
+    Spark->>FileSystem: Ensure directories exist
+    
+    loop For each patent directory
+        Spark->>CheckpointSystem: check_checkpoint_exists()
+        CheckpointSystem-->>Spark: Return checkpoint status
+        
+        alt Not already processed or force_reprocess
+            Spark->>BronzeLayer: Read Parquet files
+            BronzeLayer-->>Spark: Return bronze DataFrame
+            
+            Spark->>Transformer: transform_and_rename_fields()
+            Note over Transformer: Extract nested fields
+            Note over Transformer: Calculate field occurrence
+            Note over Transformer: Apply column mappings
+            Transformer-->>Spark: Return silver DataFrame
+            
+            Spark->>DeltaWriter: Write to Delta table
+            Note over DeltaWriter: Format as Delta
+            Note over DeltaWriter: Use overwrite mode
+            DeltaWriter-->>Spark: Delta write complete
+            
+            Spark->>CheckpointSystem: create_checkpoint_file()
+            CheckpointSystem-->>Spark: Checkpoint created
+            
+            Spark->>StatsAnalyzer: analyze_field_occurrence()
+            StatsAnalyzer-->>Spark: Return field statistics
+        else Already processed
+            Note over Spark: Skip directory
+        end
+    end
+    
+    Spark-->>User: Return success and statistics
+    
+    User->>StatsAnalyzer: Display field statistics
+    StatsAnalyzer-->>User: Show occurrence percentages

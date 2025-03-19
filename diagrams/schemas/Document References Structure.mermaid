@@ -1,0 +1,14 @@
+flowchart LR
+    pubref("publication-reference")
+    appref("application-reference")
+    
+    pubref --> pub_docid("document-id")
+    pub_docid --> pub_country("country (100%)<br><i>Publishing country</i>")
+    pub_docid --> pub_date("date (100%)<br><i>Publication date</i>")
+    pub_docid --> pub_number("doc-number (100%)<br><i>Publication number</i>")
+    pub_docid --> pub_kind("kind (100%)<br><i>Document type</i>")
+    
+    appref --> app_docid("document-id")
+    app_docid --> app_country("country (100%)<br><i>Filing country</i>")
+    app_docid --> app_date("date (100%)<br><i>Filing date</i>")
+    app_docid --> app_number("doc-number (100%)<br><i>Application number</i>")

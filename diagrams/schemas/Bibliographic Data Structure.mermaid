@@ -1,0 +1,24 @@
+flowchart TD
+    biblio("us-bibliographic-data-application")
+    
+    invention("invention-title (100%)<br><i>Title of the invention</i>")
+    pubref("publication-reference (100%)<br><i>Publication details</i>")
+    appref("application-reference (100%)<br><i>Filing details</i>")
+    classcpc("classifications-cpc (100%)<br><i>Patent classification</i>")
+    classipcr("classifications-ipcr (100%)<br><i>International classification</i>")
+    seriescode("us-application-series-code (100%)<br><i>USPTO series code</i>")
+    parties("us-parties (100%)<br><i>People and organizations</i>")
+    
+    biblio --> invention
+    biblio --> pubref
+    biblio --> appref
+    biblio --> classcpc
+    biblio --> classipcr
+    biblio --> seriescode
+    biblio --> parties
+    
+    parties --> inventors("inventors → inventor (100%)<br><i>Invention creators</i>")
+    parties --> applicants("us-applicants → us-applicant (100%)<br><i>Patent filers</i>")
+    
+    classcpc --> main("main-cpc (100%)<br><i>Primary classification</i>")
+    classcpc --> further("further-cpc (89.7%)<br><i>Additional classifications</i>")

@@ -1,0 +1,73 @@
+sequenceDiagram
+    actor User
+    participant Widgets as Databricks Widgets
+    participant Spark as Spark Session
+    participant FileSystem as dbutils.fs
+    participant DeltaTables as Delta Tables
+    participant ProcessTracker as Process Tracker
+    participant DatabaseCatalog as Database Catalog
+    participant ControlLogger as Control Logger
+    
+    User->>Widgets: Configure processing parameters
+    Note over Widgets: Set drop_schema and force_update options
+    
+    User->>Spark: main()
+    Spark->>Spark: initialize_spark()
+    
+    Spark->>ProcessTracker: check_new_data_processed()
+    Note over ProcessTracker: Check processing metadata table
+    Note over ProcessTracker: Check processing status file
+    Note over ProcessTracker: Check previous notebook result
+    ProcessTracker-->>Spark: Return processing status
+    
+    alt No new data and not force_update
+        Spark-->>User: Skip processing and exit
+    else New data or force_update
+        Spark->>Spark: register_and_upsert_all_tables()
+        
+        Spark->>DatabaseCatalog: Create control table if not exists
+        Spark->>DatabaseCatalog: Create database if not exists
+        
+        loop For each gold Delta table
+            Spark->>FileSystem: Check if Delta path exists
+            FileSystem-->>Spark: Path exists status
+            
+            Spark->>DeltaTables: Check if valid Delta table
+            DeltaTables-->>Spark: Delta table validity
+            
+            alt Path exists and valid Delta table
+                Spark->>Spark: register_and_upsert_table()
+                
+                Spark->>DeltaTables: Read source Delta table
+                DeltaTables-->>Spark: Return source DataFrame
+                
+                Spark->>DatabaseCatalog: Check if table already exists
+                DatabaseCatalog-->>Spark: Table existence status
+                
+                alt Table doesn't exist
+                    Spark->>DatabaseCatalog: Create new table
+                    Spark->>DatabaseCatalog: Configure table properties
+                    DatabaseCatalog-->>Spark: Table created confirmation
+                else Table exists and is _individual table
+                    Spark->>DatabaseCatalog: Read existing table
+                    DatabaseCatalog-->>Spark: Return target count
+                    Spark->>DatabaseCatalog: Replace table data completely
+                    DatabaseCatalog-->>Spark: Table replaced confirmation
+                else Table exists and is regular table
+                    Spark->>DatabaseCatalog: Get target Delta table
+                    DatabaseCatalog-->>Spark: Return target table
+                    Spark->>DeltaTables: Perform merge operation
+                    Note over DeltaTables: Match on publication_number
+                    Note over DeltaTables: Update matched records
+                    Note over DeltaTables: Insert new records
+                    DeltaTables-->>Spark: Merge complete confirmation
+                end
+            end
+        end
+        
+        Spark->>ControlLogger: Log update batch in control table
+        ControlLogger-->>Spark: Update logged confirmation
+        
+        Spark->>Spark: Generate processing summary
+        Spark-->>User: Return final results
+    end

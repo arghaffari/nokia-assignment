@@ -1,0 +1,17 @@
+flowchart TD
+    root("Patent Document")
+    
+    biblio("us-bibliographic-data-application (100%)<br><i>Contains all bibliographic metadata</i>")
+    abstract("abstract (100%)<br><i>Short summary of the invention</i>")
+    description("description (100%)<br><i>Detailed technical explanation</i>")
+    claims("claims (100%)<br><i>Legal definition of protected scope</i>")
+    
+    root --> biblio
+    root --> abstract
+    root --> description
+    root --> claims
+    
+    claims --> claims_claim("claim (100%)<br><i>Individual legal claims</i>")
+    abstract --> abstract_val("_VALUE (100%)<br><i>Raw text content</i>")
+    description --> description_val("_VALUE (100%)<br><i>Main text content</i>")
+    description --> description_heading("heading (99%)<br><i>Section headers</i>")

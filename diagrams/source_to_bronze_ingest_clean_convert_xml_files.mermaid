@@ -1,0 +1,59 @@
+sequenceDiagram
+    actor User
+    participant Widgets as Databricks Widgets
+    participant Spark as Spark Session
+    participant DBUtils as dbutils.fs
+    participant AutoLoader as Auto Loader Stream
+    participant LocalFS as Local File System
+    participant UCFS as Unity Catalog FS
+    participant XMLProcessor as XML Processor
+
+    User->>Widgets: Set processing parameters
+    Note over Widgets: Configure drop_schema and force_reprocess
+
+    User->>Spark: bronze_layer_processing()
+    Spark->>Spark: initialize_spark()
+    
+    Spark->>DBUtils: Check input directory
+    DBUtils-->>Spark: Return XML file list
+    
+    alt force_reprocess is true
+        Spark->>DBUtils: Clear checkpoint location
+        Spark->>DBUtils: Clear output directory
+    end
+    
+    Spark->>DBUtils: Create necessary directories
+    
+    Spark->>AutoLoader: Configure readStream
+    AutoLoader->>AutoLoader: Set up cloudFiles format
+    
+    Spark->>AutoLoader: Start stream with foreachBatch
+    
+    loop For each batch
+        AutoLoader->>Spark: process_batch(batch_df, batch_id)
+        
+        loop For each file in batch
+            alt Not already processed or force_reprocess
+                Spark->>DBUtils: Download file to local temp
+                DBUtils->>LocalFS: Copy file
+                
+                Spark->>XMLProcessor: process_xml_file()
+                XMLProcessor->>LocalFS: Read XML file
+                XMLProcessor->>XMLProcessor: clean_html_tags_lxml()
+                XMLProcessor->>LocalFS: Write cleaned XML
+                
+                Spark->>DBUtils: Upload cleaned file to bronze layer
+                DBUtils->>UCFS: Copy cleaned file
+                
+                Spark->>Spark: Read XML with Spark reader
+                Spark->>Spark: Create DataFrame with metadata
+                
+                Spark->>UCFS: Write DataFrame as Parquet
+                UCFS-->>Spark: Parquet write complete
+            end
+        end
+    end
+    
+    AutoLoader-->>Spark: Stream completed
+    Spark->>LocalFS: Clean up temp directories
+    Spark-->>User: Processing complete
